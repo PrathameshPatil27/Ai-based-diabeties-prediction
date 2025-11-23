@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom';
 const Prediction = () => {
   const { user } = useAuth();
   const [formData, setFormData] = useState({
+    gender: '',
     pregnancies: '',
     glucose: '',
     bloodPressure: '',
@@ -18,20 +19,149 @@ const Prediction = () => {
   });
   const [loading, setLoading] = useState(false);
   const [predictionResult, setPredictionResult] = useState(null);
+  const [errors, setErrors] = useState({});
+
+  // Validation rules for each field
+  const validationRules = {
+    pregnancies: { min: 0, max: 20 },
+    glucose: { min: 0, max: 400, required: true },
+    bloodPressure: { min: 0, max: 220 },
+    skinThickness: { min: 0, max: 99 },
+    insulin: { min: 0, max: 846 },
+    bmi: { min: 5, max: 67.1, required: true },
+    diabetesPedigreeFunction: { min: 0, max: 2.42 },
+    age: { min: 1, max: 120, required: true }
+  };
+
+  const validateField = (name, value) => {
+    const rule = validationRules[name];
+    if (!rule) return null;
+
+    // Check if required field is empty
+    if (rule.required && (!value || value === '')) {
+      return `${name.charAt(0).toUpperCase() + name.slice(1).replace(/([A-Z])/g, ' $1')} is required`;
+    }
+
+    // Skip validation if field is empty and not required
+    if (!value || value === '') return null;
+
+    const numValue = parseFloat(value);
+
+    // Check if value is a valid number
+    if (isNaN(numValue)) {
+      return 'Please enter a valid number';
+    }
+
+    // Check minimum value
+    if (rule.min !== undefined && numValue < rule.min) {
+      return `Value must be greater than or equal to ${rule.min}`;
+    }
+
+    // Check maximum value
+    if (rule.max !== undefined && numValue > rule.max) {
+      return `Value must be less than or equal to ${rule.max}`;
+    }
+
+    return null;
+  };
 
   const handleChange = (e) => {
+    const { name, value } = e.target;
+    
+    // Clear error for this field when user types
+    if (errors[name]) {
+      setErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[name];
+        return newErrors;
+      });
+    }
+
+    // Validate on change for immediate feedback
+    const error = validateField(name, value);
+    if (error) {
+      setErrors(prev => ({ ...prev, [name]: error }));
+    }
+
     setFormData({
       ...formData,
-      [e.target.name]: e.target.value
+      [name]: value
     });
+    
+    // Clear pregnancies if gender is changed to male
+    if (name === 'gender' && value === 'male') {
+      setFormData(prev => ({
+        ...prev,
+        gender: value,
+        pregnancies: ''
+      }));
+      setErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors.pregnancies;
+        return newErrors;
+      });
+    }
+  };
+
+  const validateForm = () => {
+    const newErrors = {};
+
+    // Validate gender
+    if (!formData.gender) {
+      newErrors.gender = 'Gender is required';
+    }
+
+    // Validate all fields
+    Object.keys(validationRules).forEach(fieldName => {
+      // Skip pregnancies if gender is male
+      if (fieldName === 'pregnancies' && formData.gender !== 'female') {
+        return;
+      }
+
+      const error = validateField(fieldName, formData[fieldName]);
+      if (error) {
+        newErrors[fieldName] = error;
+      }
+    });
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Validate entire form
+    if (!validateForm()) {
+      // Scroll to first error
+      const firstErrorField = Object.keys(errors)[0];
+      if (firstErrorField) {
+        const element = document.getElementById(firstErrorField);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          element.focus();
+        }
+      }
+      return;
+    }
+    
     setLoading(true);
     
     try {
-      const doc = await predictionService.predict(formData);
+      // Prepare data for API (ensure pregnancies is only sent if female)
+      const submitData = {
+        gender: formData.gender,
+        pregnancies: formData.gender === 'female' ? parseFloat(formData.pregnancies) || 0 : 0,
+        glucose: parseFloat(formData.glucose),
+        bloodPressure: parseFloat(formData.bloodPressure) || 0,
+        skinThickness: parseFloat(formData.skinThickness) || 0,
+        insulin: parseFloat(formData.insulin) || 0,
+        bmi: parseFloat(formData.bmi),
+        diabetesPedigreeFunction: parseFloat(formData.diabetesPedigreeFunction) || 0,
+        age: parseFloat(formData.age)
+      };
+      
+      const doc = await predictionService.predict(submitData);
       const pct = Math.round((doc?.result?.probability || 0) * 100);
       const riskLevel = pct >= 70 ? 'high' : pct >= 40 ? 'medium' : 'low';
       setPredictionResult({
@@ -39,8 +169,30 @@ const Prediction = () => {
         riskLevel,
         result: doc?.result?.hasDiabetes ? 'Positive' : 'Negative',
       });
+      // Clear any previous errors on successful prediction
+      setErrors({});
     } catch (error) {
-      alert('Prediction failed: ' + error.message);
+      // Handle validation errors from server
+      const errorMessage = error.response?.data?.errors 
+        ? error.response.data.errors.join('. ')
+        : error.message || 'Prediction failed';
+      
+      alert('Validation Error: ' + errorMessage);
+      
+      // If server returns field-specific errors, display them
+      if (error.response?.data?.errors) {
+        const serverErrors = {};
+        error.response.data.errors.forEach(err => {
+          // Try to extract field name from error message
+          const fieldMatch = err.match(/(\w+)\s+/);
+          if (fieldMatch) {
+            serverErrors[fieldMatch[1]] = err;
+          }
+        });
+        if (Object.keys(serverErrors).length > 0) {
+          setErrors(prev => ({ ...prev, ...serverErrors }));
+        }
+      }
     } finally {
       setLoading(false);
     }
@@ -64,7 +216,7 @@ const Prediction = () => {
             Diabetes Risk Prediction
           </h1>
           <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-            Enter your health metrics to assess your diabetes risk using our AI-powered prediction model.
+            Enter your health metrics to assess your diabetes risk.
           </p>
         </div>
 
@@ -73,19 +225,72 @@ const Prediction = () => {
           <div className="card">
             <h2 className="text-2xl font-bold text-gray-900 mb-6">Health Metrics</h2>
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Gender Selection - First Field */}
+              <div className="md:col-span-2">
+                <label htmlFor="gender" className="form-label">
+                  Gender <span className="text-red-500">*</span>
+                </label>
+                <select
+                  id="gender"
+                  name="gender"
+                  value={formData.gender}
+                  onChange={handleChange}
+                  onBlur={(e) => {
+                    const error = !e.target.value ? 'Gender is required' : null;
+                    setErrors(prev => error ? { ...prev, gender: error } : { ...prev, gender: undefined });
+                  }}
+                  className={`form-input ${errors.gender ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : ''}`}
+                  required
+                >
+                  <option value="">Select Gender</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                </select>
+                {errors.gender && (
+                  <p className="mt-1 text-sm text-red-600">{errors.gender}</p>
+                )}
+              </div>
+
+              {/* Pregnancies - Only show if female */}
+              {formData.gender === 'female' && (
+                <div>
+                  <label htmlFor="pregnancies" className="form-label">
+                    Pregnancies
+                  </label>
+                  <input
+                    id="pregnancies"
+                    name="pregnancies"
+                    type="number"
+                    value={formData.pregnancies}
+                    onChange={handleChange}
+                    onBlur={(e) => {
+                      const error = validateField('pregnancies', e.target.value);
+                      setErrors(prev => error ? { ...prev, pregnancies: error } : { ...prev, pregnancies: undefined });
+                    }}
+                    className={`form-input ${errors.pregnancies ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : ''}`}
+                    min={0}
+                    max={20}
+                    step={1}
+                  />
+                  {errors.pregnancies && (
+                    <p className="mt-1 text-sm text-red-600">{errors.pregnancies}</p>
+                  )}
+                </div>
+              )}
+
+              {/* Other Health Metrics */}
               {[
-                { name: 'pregnancies', label: 'Pregnancies', type: 'number', min: 0, max: 20 },
-                { name: 'glucose', label: 'Glucose (mg/dL)', type: 'number', min: 0, max: 300 },
-                { name: 'bloodPressure', label: 'Blood Pressure (mm Hg)', type: 'number', min: 0, max: 150 },
-                { name: 'skinThickness', label: 'Skin Thickness (mm)', type: 'number', min: 0, max: 100 },
-                { name: 'insulin', label: 'Insulin (μU/ml)', type: 'number', min: 0, max: 900 },
-                { name: 'bmi', label: 'BMI', type: 'number', step: '0.1', min: 0, max: 70 },
-                { name: 'diabetesPedigreeFunction', label: 'Diabetes Pedigree', type: 'number', step: '0.001', min: 0, max: 2.5 },
-                { name: 'age', label: 'Age', type: 'number', min: 1, max: 120 }
+                { name: 'glucose', label: 'Glucose (mg/dL)', type: 'number', min: 0, max: 400, required: true },
+                { name: 'bloodPressure', label: 'Blood Pressure (mm Hg)', type: 'number', min: 0, max: 220 },
+                { name: 'skinThickness', label: 'Skin Thickness (mm)', type: 'number', min: 0, max: 99 },
+                { name: 'insulin', label: 'Insulin (μU/ml)', type: 'number', min: 0, max: 846 },
+                { name: 'bmi', label: 'BMI', type: 'number', step: '0.1', min: 5, max: 67.1, required: true },
+                { name: 'diabetesPedigreeFunction', label: 'Diabetes Pedigree', type: 'number', step: '0.001', min: 0, max: 2.42 },
+                { name: 'age', label: 'Age', type: 'number', min: 1, max: 120, required: true }
               ].map((field) => (
                 <div key={field.name}>
                   <label htmlFor={field.name} className="form-label">
-                    {field.label}
+                    {field.label} {field.required && <span className="text-red-500">*</span>}
                   </label>
                   <input
                     id={field.name}
@@ -93,11 +298,19 @@ const Prediction = () => {
                     type={field.type}
                     value={formData[field.name]}
                     onChange={handleChange}
-                    className="form-input"
+                    onBlur={(e) => {
+                      const error = validateField(field.name, e.target.value);
+                      setErrors(prev => error ? { ...prev, [field.name]: error } : { ...prev, [field.name]: undefined });
+                    }}
+                    className={`form-input ${errors[field.name] ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : ''}`}
                     min={field.min}
                     max={field.max}
                     step={field.step}
+                    required={field.required}
                   />
+                  {errors[field.name] && (
+                    <p className="mt-1 text-sm text-red-600">{errors[field.name]}</p>
+                  )}
                 </div>
               ))}
             </form>

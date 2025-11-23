@@ -4,6 +4,7 @@ const PredictionSchema = new mongoose.Schema(
   {
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     input: {
+      gender: String,
       pregnancies: Number,
       glucose: Number,
       bloodPressure: Number,

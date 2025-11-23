@@ -8,6 +8,7 @@ import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Prediction from './pages/Prediction';
 import Recommendation from './pages/Recommendation';
+import History from './pages/History';
 
 function App() {
   return (
@@ -23,6 +24,7 @@ function App() {
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/prediction" element={<Prediction />} />
               <Route path="/recommendation" element={<Recommendation />} />
+              <Route path="/history" element={<History />} />
             </Routes>
           </main>
           <Footer />

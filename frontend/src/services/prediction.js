@@ -6,7 +6,10 @@ export const predictionService = {
       const response = await api.post('/prediction/predict', data);
       return response.data;
     } catch (error) {
-      throw new Error(error.response?.data?.message || 'Prediction failed');
+      // Preserve the full error object so we can access response.data.errors
+      const errorObj = new Error(error.response?.data?.message || 'Prediction failed');
+      errorObj.response = error.response;
+      throw errorObj;
     }
   },
 

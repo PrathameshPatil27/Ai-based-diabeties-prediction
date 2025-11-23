@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { recommendationService } from '../services';
+import { recommendationService, predictionService } from '../services';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 const Recommendation = () => {
@@ -11,6 +11,41 @@ const Recommendation = () => {
   });
   const [loading, setLoading] = useState(false);
   const [recommendation, setRecommendation] = useState(null);
+  const [loadingPrediction, setLoadingPrediction] = useState(true);
+
+  // Fetch latest prediction and auto-fill risk level
+  useEffect(() => {
+    const fetchLatestPrediction = async () => {
+      try {
+        setLoadingPrediction(true);
+        const predictions = await predictionService.getHistory();
+        
+        if (predictions && predictions.length > 0) {
+          // Get the most recent prediction (first one in sorted list)
+          const latestPrediction = predictions[0];
+          
+          if (latestPrediction?.result?.probability !== undefined) {
+            // Calculate risk level from probability (same logic as Prediction page)
+            const pct = Math.round((latestPrediction.result.probability || 0) * 100);
+            const riskLevel = pct >= 70 ? 'high' : pct >= 40 ? 'medium' : 'low';
+            
+            // Auto-fill the risk level
+            setFormData(prev => ({
+              ...prev,
+              riskLevel: riskLevel
+            }));
+          }
+        }
+      } catch (error) {
+        // Silently fail - just use default risk level if prediction fetch fails
+        console.log('Could not fetch latest prediction:', error.message);
+      } finally {
+        setLoadingPrediction(false);
+      }
+    };
+
+    fetchLatestPrediction();
+  }, []);
 
   const handleChange = (e) => {
     setFormData({
@@ -130,6 +165,7 @@ const Recommendation = () => {
                   value={formData.riskLevel}
                   onChange={handleChange}
                   className="form-input"
+                  disabled={loadingPrediction}
                 >
                   <option value="low">Low Risk</option>
                   <option value="medium">Medium Risk</option>
